@@ -1,9 +1,5 @@
+#!/usr/bin/python
 # tamefox.py - Puts firefox & chromium to sleep when they do not have focus.
-#
-# Requirements: python-xlib python-psutil
-#
-# Author: Luke Macken <lmacken@redhat.com>
-# Thanks to Jordan Sissel and Adam Jackson for their help
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,29 +14,46 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
-# Copyright (C) 2008-2013  Luke Macken <lmacken@redhat.com>
-
-import time
-import psutil
-import psutil.error
+# (c) 2017 aexaey
+#
+# watch() function is (C) 2008-2013 Luke Macken <lmacken@redhat.com>, Jordan Sissel, Adam Jackson
 
 from signal import SIGSTOP, SIGCONT
 from Xlib import X, display, Xatom
+from os import kill, system, stat, getuid
+import re
+import atexit
 
-VERSION = '1.4'
-TAME = ['Firefox', 'Chromium', 'Google Chrome']  # Windows that we wish to tame
+TAME = re.compile('.*Firefox|.*Chromium.*|.*Google Chrome.*')  # regex for windows that we wish to tame
 
-dpy = display.Display()
+# globals
+waiting = set()
+lastpid = False
 
 
-def watch(properties):
+def sig(pid, signal):
+    if pid and pid > 1 and signal:
+        if not getuid() or stat('/proc/%d' % pid).st_uid == getuid():
+            kill(pid, signal)
+        else:
+            system("sudo -n kill -%d %d" % (signal, pid))
+
+
+@atexit.register
+def contall():
+    for pid in waiting:
+        sig(pid, SIGCONT)
+
+
+def watch():
     """ A generator that yields events for a list of X properties """
+    dpy = display.Display()
     screens = dpy.screen_count()
     atoms = {}
     wm_pid = dpy.get_atom('_NET_WM_PID')
     wm_client_leader = dpy.get_atom('WM_CLIENT_LEADER')
 
-    for property in properties:
+    for property in ['_NET_ACTIVE_WINDOW']:
         atomid = dpy.get_atom(property, only_if_exists=True)
         if atomid != X.NONE:
             atoms[atomid] = property
@@ -73,87 +86,17 @@ def watch(properties):
                 except Exception, e:
                     print(str(e))
                     continue
-                yield atoms[ev.atom], title, pid, data, parent
+                if title and pid:
+                    yield title, pid
 
 
-def wait_for_stop(process):
-    while True:
-        if process.status == psutil.STATUS_STOPPED:
-            break
-
-
-def send_signal(process, signal):
-    action = signal is SIGSTOP and 'Stopping' or 'Continuing'
-    print('%s %s' % (action, process.name))
-    process.send_signal(signal)
-    for child in process.get_children():
-        print('%s %s' % (action, child.name))
-        child.send_signal(signal)
-
-
-def tame():
-    processes = {}
-    awake = []
-
-    def stop(process):
-        time.sleep(1.0)  # Let wm animations finish
-        dpy.grab_server()
-        dpy.sync()
-        try:
-            send_signal(process, SIGSTOP)
-            wait_for_stop(process)
-            awake.remove(process.pid)
-        except psutil.error.NoSuchProcess:
-            awake.remove(process.pid)
-            del(processes[process.pid])
-        finally:
-            dpy.ungrab_server()
-
-    def cont(process):
-        pid = process.pid
-        if pid in awake:
-            return
-        try:
-            send_signal(process, SIGCONT)
-            if pid not in awake:
-                awake.append(pid)
-        except psutil.error.NoSuchProcess:
-            del(processes[pid])
-            if pid in awake:
-                awake.remove(pid)
-
-    try:
-        for prop, title, pid, event, parent in watch(['_NET_ACTIVE_WINDOW']):
-            try:
-                proc = psutil.Process(pid)
-            except psutil.error.NoSuchProcess:
-                continue
-            if parent in TAME and pid not in processes:
-                processes[pid] = proc
-                awake.append(pid)
-            if pid in processes:
-                for process in processes.values():
-                    cont(process)
-                for other in [p for p in awake if p != pid]:
-                    stop(processes[other])
-            elif proc.ppid in processes:
-                if proc.ppid not in awake:
-                    cont(proc.parent)
-            else:
-                for running in [p for p in awake]:
-                    stop(processes[running])
-    finally:
-        for process in processes.values():
-            try:
-                if process.status == psutil.STATUS_STOPPED:
-                    cont(process)
-            except psutil.error.NoSuchProcess:
-                pass
-
-
-if __name__ == '__main__':
-    print("Tamefox v%s running..." % VERSION)
-    try:
-        tame()
-    except KeyboardInterrupt:
-        pass
+for title, pid in watch():
+    if lastpid:
+        system("xsel -k; xsel -bo | xsel -bi")
+        waiting.add(lastpid)
+        sig(lastpid, SIGSTOP)
+        lastpid = False
+    if TAME.match(title):
+        sig(pid, SIGCONT)
+        waiting.discard(pid)
+        lastpid = pid
