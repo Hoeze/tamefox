@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # tamefox.py - Puts firefox & chromium to sleep when they do not have focus.
 #
 # This program is free software: you can redistribute it and/or modify
@@ -77,14 +77,14 @@ def watch():
                     parent = parent.value.tolist()[0]
                     parent = dpy.create_resource_object('window', parent)
                     parent = parent.get_full_property(Xatom.WM_NAME, 0).value
-                except Exception, e:
-                    print(str(e))
+                except Exception as e:
+                    print((str(e)))
                 try:
                     pid = window.get_full_property(wm_pid, 0)
                     pid = int(pid.value.tolist()[0])
                     title = window.get_full_property(Xatom.WM_NAME, 0).value
-                except Exception, e:
-                    print(str(e))
+                except Exception as e:
+                    print((str(e)))
                     continue
                 if title and pid:
                     yield title, pid
@@ -96,7 +96,9 @@ for title, pid in watch():
         waiting.add(lastpid)
         sig(lastpid, SIGSTOP)
         lastpid = False
-    if TAME.match(title):
+    if TAME.match(str(title)):
         sig(pid, SIGCONT)
         waiting.discard(pid)
         lastpid = pid
+
+
