@@ -4,6 +4,7 @@ Description=Auto-suspend firefox process
 Type=simple
 TimeoutStartSec=0
 ExecStart=%h/.local/bin/tamefox
+KillSignal=SIGINT
 [Install]
 WantedBy=default.target
 
